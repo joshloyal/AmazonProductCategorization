@@ -1,6 +1,7 @@
 import glob
 import os
 
+import h5py
 import numpy as np
 from joblib import Parallel, delayed
 from PIL import Image as pil_image
@@ -128,23 +129,23 @@ def process_jpeg_image(image_file, name=None, target_size=244):
 def vgg_embedding(image_directory, checkpoint_path, batch_size=32):
     with tf.Graph().as_default():
         filename_queue = tf.train.string_input_producer(
-            tf.train.match_filenames_once(image_directory + '/*.jpg'),
+            tf.train.match_filenames_once(os.path.join(image_directory, '*.jpg')),
             num_epochs=1,
             shuffle=False)
 
         image_reader = tf.WholeFileReader()
-        _, image_file = image_reader.read(filename_queue)
+        image_path, image_file = image_reader.read(filename_queue)
         image = process_jpeg_image(image_file,
                                    target_size=vgg.vgg_16.default_image_size)
 
-        images = tf.train.batch(
-            [image],
+        images, image_paths = tf.train.batch(
+            [image, image_path],
             batch_size=batch_size,
             num_threads=1,  # vgg is run on gpu this can be higher
             allow_smaller_final_batch=True)
 
         init_vgg16, features = vgg16_features(images,
-                                              checkpoint_path='./vgg_16.ckpt',
+                                              checkpoint_path=checkpoint_path,
                                               include_top=False)
 
         init_op = tf.group(tf.local_variables_initializer(),
@@ -157,16 +158,55 @@ def vgg_embedding(image_directory, checkpoint_path, batch_size=32):
             threads = tf.train.start_queue_runners(sess=sess, coord=coord)
             try:
                 while not coord.should_stop():
-                    result = sess.run([features])
-                    coord.request_stop()
+                    yield sess.run([features, image_paths])
             except tf.errors.OutOfRangeError:
                 pass
             finally:
                 coord.request_stop()
                 coord.join(threads)
 
-        return result
+
+def create_dset_from_chunk(h5file, chunk, name):
+    maxshape = (None,) + chunk.shape[1:]
+
+    if chunk.dtype == np.object:
+        dt = h5py.special_dtype(vlen=unicode)
+        chunk = chunk.astype(np.unicode)
+    else:
+        dt = chunk.dtype
+
+    dset = h5file.create_dataset(name,
+                                 shape=chunk.shape,
+                                 maxshape=maxshape,
+                                 chunks=chunk.shape,
+                                 dtype=dt,
+                                 compression='gzip',
+                                 compression_opts=9)
+
+    dset[:] = chunk
+
+    return dset
+
+
+def expand_dset_from_chunk(dset, chunk, row_count):
+    dset.resize(row_count + chunk.shape[0], axis=0)
+    dset[row_count:] = chunk
+
+
+def create_from_generator(file_name, generator):
+    with h5py.File(file_name, 'w') as h5file:
+        feature_chunk, file_chunk = next(generator)
+        row_count = feature_chunk.shape[0]
+
+        feature_dset = create_dset_from_chunk(h5file, feature_chunk, 'vgg_features')
+        file_dset = create_dset_from_chunk(h5file, file_chunk, 'file_paths')
+
+        for chunk in generator:
+            expand_dset_from_chunk(feature_dset, feature_chunk, row_count)
+            expand_dset_from_chunk(file_dset, file_chunk, row_count)
+            row_count += feature_chunk.shape[0]
 
 
 #sprite = images_to_sprite('./images', n_samples=500)
-e = vgg_embedding('./images', None, batch_size=1)
+vgg_gen = vgg_embedding('./images', './vgg_16.ckpt', batch_size=32)
+create_from_generator('vgg_features.hdf5', vgg_gen)
