@@ -123,6 +123,7 @@ def process_jpeg_image(image_file, name=None, target_size=244):
         image = tf.image.decode_jpeg(image_file, channels=3)
         image = tf.expand_dims(image, 0)
         image = tf.image.resize_images(image, [target_size, target_size])
+        image = image  / 255.
         return tf.squeeze(image)
 
 
@@ -208,5 +209,15 @@ def create_from_generator(file_name, generator):
 
 
 #sprite = images_to_sprite('./images', n_samples=500)
-vgg_gen = vgg_embedding('./images', './vgg_16.ckpt', batch_size=32)
-create_from_generator('vgg_features.hdf5', vgg_gen)
+#vgg_gen = vgg_embedding('./images', './vgg_16.ckpt', batch_size=32)
+#create_from_generator('vgg_features.hdf5', vgg_gen)
+
+#with tf.Session() as sess:
+#    coord = tf.train.Coordinator()
+#    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+#    try:
+#        with coord.stop_on_exception():
+#            while not coord.should_stop():
+#                print sess.run(target)
+#    finally:
+#        coord.join(threads)
