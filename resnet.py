@@ -8,7 +8,7 @@ import functools
 import joblib
 import cPickle as pickle
 import chest
-from generators import ImageListIterator
+from data_gen import ImageListDataGenerator
 
 
 def get_cache(cache_dir):
@@ -64,31 +64,29 @@ def write_to_cache(features, image_files, cache):
         cache[image_filename] = feature
 
 
-df = pd.read_csv('amazon_products_train.csv')
-image_list = df.image_file.apply(lambda x: './images/' + x).values
-
-
-def extract_resnet50_features(image_list):
+def extract_resnet50_features(image_list, image_dir=''):
     image_size = 244
     n_channels = 3
     model = resnet50.ResNet50(include_top=False,
                               weights='imagenet',
                               input_shape=(image_size, image_size, n_channels))
 
-    datagen = ImageListIterator(image_list, y=None,
-                                image_data_generator=image.ImageDataGenerator(rescale=1./255.),
-                                target_size=(image_size, image_size),
-                                batch_size=32,
-                                shuffle=False)
+    datagen = ImageListDataGenerator(rescale=(1./255.))
+    generator = datagen.flow_from_image_list(image_list, y=None,
+                                             image_dir=image_dir,
+                                             target_size=(244, 244),
+                                             batch_size=32,
+                                             shuffle=False)
 
-    return model.predict_generator(datagen, len(image_list))
+    return model.predict_generator(generator, len(image_list))
 
 
 class ResNetVectorizer(BaseEstimator, TransformerMixin):
     """Simple scikit-learn style transform that passes images through a
     resnet model. Has an option to cache the images for subsequent calls
     to the transformer."""
-    def __init__(self, use_cache=False, cache_dir=None):
+    def __init__(self, image_dir='', use_cache=False, cache_dir=None):
+        self.image_dir = image_dir
         self.cache_dir = cache_dir
         self.use_cache = use_cache
 
@@ -108,7 +106,7 @@ class ResNetVectorizer(BaseEstimator, TransformerMixin):
 
         output = np.zeros((n_samples, 2048), dtype=np.float32)
         if image_files:
-            features = np.squeeze(extract_resnet50_features(image_files))
+            features = np.squeeze(extract_resnet50_features(image_files, self.image_dir))
             output[image_indices, :] = features
 
             if self.use_cache:
@@ -118,7 +116,3 @@ class ResNetVectorizer(BaseEstimator, TransformerMixin):
             fill_from_cache(output, cache_files, cache_indices, cache)
 
         return output
-
-
-vec = ResnetVectorizer(use_cache=True, cache_dir='resnet50')
-features = vec.fit_transform(image_list)

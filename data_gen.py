@@ -1,10 +1,16 @@
+import os
+
 import numpy as np
 import keras.backend as K
 from keras.preprocessing import image
+from keras.applications.imagenet_utils import preprocess_input
+import image_utils
 
 
 class ImageListIterator(image.Iterator):
-    def __init__(self, image_list, y, image_data_generator,
+    def __init__(self, image_list, y,
+                 image_data_generator,
+                 image_dir='',
                  target_size=(256, 256), color_mode='rgb',
                  dim_ordering='default',
                  batch_size=32, shuffle=False, seed=None,
@@ -38,8 +44,9 @@ class ImageListIterator(image.Iterator):
                 self.image_shape = self.target_size + (1,)
             else:
                 self.image_shape = (1,) + self.target_size
+        self.image_dir = image_dir
         self.save_to_dir = save_to_dir
-        self.save_prefixe = save_prefix
+        self.save_prefix = save_prefix
         self.save_format = save_format
         super(ImageListIterator, self).__init__(len(image_list), batch_size, shuffle, seed)
 
@@ -51,24 +58,39 @@ class ImageListIterator(image.Iterator):
         # build batch of image data
         for i, j in enumerate(index_array):
             fname = self.image_list[j]
-            img = image.load_img(fname,
+            img = image.load_img(os.path.join(self.image_dir, fname),
                                  grayscale=grayscale,
                                  target_size=self.target_size)
             x = image.img_to_array(img, dim_ordering=self.dim_ordering)
             x = self.image_data_generator.random_transform(x)
             x = self.image_data_generator.standardize(x)
             batch_x[i] = x
+        if self.save_to_dir:
+            for k in range(current_batch_size):
+                img = image.array_to_img(batch_x[k], self.dim_ordering, scale=True)
+                fname = '{prefix}_{index}_{hash}.{format}'.format(prefix=self.save_prefix,
+                                                                  index=current_index + i,
+                                                                  hash=np.random.randint(1e4),
+                                                                  format=self.save_format)
+                img.save(os.path.join(self.save_to_dir, fname))
 
-            if self.save_to_dir:
-                for i in range(current_batch_size):
-                    img = image.array_to_img(batch_x[i], self.dim_ordering, scale=True)
-                    fname = '{prefix}_{index}_{hash}.{format}'.format(prefix=self.save_prefix,
-                                                                      index=current_index + i,
-                                                                      hash=np.random.randint(1e4),
-                                                                      format=self.save_format)
-                    img.save(os.path.join(self.save_to_dir, fname))
+        if self.y is None:
+            return batch_x
+        batch_y = self.y[index_array]
+        return batch_x, batch_y
 
-            if self.y is None:
-                return batch_x
-            batch_y = self.y[index_array]
-            return batch_x, batch_y
+
+class ImageListDataGenerator(image.ImageDataGenerator):
+    def flow_from_image_list(self, image_list, y,
+                             image_dir='',
+                             target_size=(256, 256), color_mode='rgb',
+                             dim_ordering='default',
+                             batch_size=32, shuffle=False, seed=None,
+                             save_to_dir=None, save_prefix='', save_format='jpeg'):
+        return ImageListIterator(image_list, y, self,
+                                 image_dir=image_dir,
+                                 target_size=target_size, color_mode=color_mode,
+                                 dim_ordering=dim_ordering,
+                                 batch_size=batch_size, shuffle=shuffle, seed=None,
+                                 save_to_dir=save_to_dir, save_prefix=save_prefix,
+                                 save_format=save_format)

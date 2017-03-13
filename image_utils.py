@@ -4,13 +4,19 @@ from __future__ import unicode_literals
 
 import glob
 import os
+import functools
+import itertools
 
 import numpy as np
 from joblib import Parallel, delayed
 from PIL import Image as pil_image
 
 
-image_size = 128
+image_extensions = {'jpg', 'jpeg', 'png'}
+
+
+def image_path(image_file, image_dir=''):
+    return os.path.join(image_dir, image_file)
 
 
 def sample_images(seq, n_samples, seed=123):
@@ -18,30 +24,59 @@ def sample_images(seq, n_samples, seed=123):
     return random_state.choice(seq, size=n_samples, replace=False)
 
 
-def load_image(image_path, target_size=None, dtype=np.uint8):
+def load_image(image_file,
+               image_dir='',
+               target_size=None,
+               dtype=np.uint8,
+               as_image=False):
     """Loads an image into PIL format."""
-    img = pil_image.open(image_path).convert('RGB')
+    image_loc = image_path(image_dir, image_file)
+    img = pil_image.open(image_loc).convert('RGB')
     if target_size:
         img = img.resize((target_size[1], target_size[0]))
+
+    if as_image:
+        return img
     return np.expand_dims(np.asarray(img, dtype), 0)
 
 
-def load_images(image_files, n_samples=None, dtype=np.uint8, n_jobs=1):
+def load_images(image_files,
+                image_dir='',
+                n_samples=None,
+                target_size=(128, 128),
+                dtype=np.uint8,
+                n_jobs=1):
     if n_samples is not None and n_samples < len(image_files):
         image_files = sample_images(image_files, n_samples)
 
     # perform this in parallel with joblib
     images = Parallel(n_jobs=n_jobs)(
-                delayed(load_image)(img, target_size=(image_size, image_size), dtype=dtype)
+                delayed(load_image)(img,
+                                    image_dir=image_dir,
+                                    target_size=target_size, dtype=dtype)
                 for img in image_files)
 
     return np.vstack(images)
 
 
-def load_from_directory(image_directory, n_samples=None, dtype=np.uint8, n_jobs=1):
-    image_glob = os.path.join(image_directory, '*.jpg')
-    image_files = glob.glob(image_glob)
-    return load_images(image_files, n_samples=n_samples, dtype=dtype, n_jobs=n_jobs)
+def image_glob_pattern(image_directory, ext):
+    return os.path.join(image_directory, '*.' + ext)
+
+
+def image_glob(image_directory, ext):
+    return glob.glob(image_glob_pattern(image_directory, ext))
+
+
+def load_from_directory(image_directory,
+                        n_samples=None,
+                        dtype=np.uint8,
+                        n_jobs=1):
+    image_files = list(itertools.chain.from_iterable(
+        [image_glob(image_directory, ext) for ext in image_extensions]))
+    return load_images(image_files,
+                       n_samples=n_samples,
+                       dtype=dtype,
+                       n_jobs=n_jobs)
 
 
 def min_max_scale(data):
@@ -70,13 +105,16 @@ def zero_pad(data, target_size):
     return data
 
 
-def images_to_sprite(images):
+def images_to_sprite(images, as_image=False):
     """Creates a sprite image along with any necessary padding.
 
     Parameters
     ----------
     images : array-like of shape [n_samples, width, height, channels]
         A four dimensional array of images.
+
+    as_image : bool (default=False)
+        Whether to return a PIL image otherwise return a numpy array.
 
     Returns
     -------
@@ -98,10 +136,15 @@ def images_to_sprite(images):
                          target_size * data.shape[3]) + data.shape[4:])
     data = (data * 255).astype(np.uint8)
 
+    if as_image:
+        return pil_image.fromarray(data)
     return data
 
 
-def directory_to_sprites(image_directory, n_samples=None, n_jobs=1):
+def directory_to_sprites(image_directory,
+                         n_samples=None,
+                         as_image=False,
+                         n_jobs=1):
     """Creates a sprite image along with any necessary padding.
 
     Parameters
@@ -112,6 +155,9 @@ def directory_to_sprites(image_directory, n_samples=None, n_jobs=1):
     n_samples : int (default=None)
         The number of random sample images to use. If None, then
         all images are loaded. This can be memory expensive.
+
+    as_image : bool (default=False)
+        Whether to return a PIL image otherwise return a numpy array.
 
     n_jobs : int (default=1)
         The number of parallel workers to use for loading
@@ -127,4 +173,4 @@ def directory_to_sprites(image_directory, n_samples=None, n_jobs=1):
         dtype=np.float32,
         n_jobs=n_jobs)
 
-    return images_to_sprite(images)
+    return images_to_sprite(images, as_image=as_image)
