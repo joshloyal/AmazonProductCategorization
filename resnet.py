@@ -91,7 +91,8 @@ class ResNetVectorizer(BaseEstimator, TransformerMixin):
         self.use_cache = use_cache
 
     def clear_cache(self):
-        pass
+        cache = get_cache(self.cache_dir)
+        cache.drop()
 
     def fit(self, image_files):
         return self

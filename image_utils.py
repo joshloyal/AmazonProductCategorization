@@ -30,7 +30,7 @@ def load_image(image_file,
                dtype=np.uint8,
                as_image=False):
     """Loads an image into PIL format."""
-    image_loc = image_path(image_dir, image_file)
+    image_loc = image_path(image_file, image_dir=image_dir)
     img = pil_image.open(image_loc).convert('RGB')
     if target_size:
         img = img.resize((target_size[1], target_size[0]))
